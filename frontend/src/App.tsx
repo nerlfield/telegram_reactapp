@@ -27,6 +27,77 @@ function App() {
   const [cellSize, setCellSize] = useState(20);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Add new state for touch handling
+  const [touchStart, setTouchStart] = useState<Position | null>(null);
+  
+  // Load high score on component mount
+  useEffect(() => {
+    const loadHighScore = async () => {
+      if (!webApp?.initDataUnsafe?.user?.id) return;
+      
+      try {
+        const response = await fetch(`/api/scores/${webApp.initDataUnsafe.user.id}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch high score');
+        }
+        const data = await response.json();
+        setHighScore(data.highest_score);
+      } catch (error) {
+        console.error('Error loading high score:', error);
+      }
+    };
+
+    loadHighScore();
+  }, [webApp?.initDataUnsafe?.user?.id]);
+
+  // Add touch handlers
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    setTouchStart({
+      x: touch.clientX,
+      y: touch.clientY
+    });
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart) return;
+
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchStart.x;
+    const deltaY = touch.clientY - touchStart.y;
+    
+    // Require minimum swipe distance to trigger direction change (20px)
+    const minSwipeDistance = 20;
+    
+    if (Math.abs(deltaX) < minSwipeDistance && Math.abs(deltaY) < minSwipeDistance) {
+      return;
+    }
+
+    // Determine swipe direction based on the largest delta
+    if (Math.abs(deltaX) > Math.abs(deltaY)) {
+      // Horizontal swipe
+      if (deltaX > 0 && direction !== 'LEFT') {
+        setDirection('RIGHT');
+      } else if (deltaX < 0 && direction !== 'RIGHT') {
+        setDirection('LEFT');
+      }
+    } else {
+      // Vertical swipe
+      if (deltaY > 0 && direction !== 'UP') {
+        setDirection('DOWN');
+      } else if (deltaY < 0 && direction !== 'DOWN') {
+        setDirection('UP');
+      }
+    }
+    
+    // Reset touch start to prevent multiple triggers
+    setTouchStart(null);
+  };
+
+  const handleTouchEnd = () => {
+    setTouchStart(null);
+  };
+
   const calculateCellSize = useCallback(() => {
     if (!containerRef.current) return 20;
     
@@ -161,18 +232,26 @@ function App() {
   }, [direction]);
 
   const submitScore = async (finalScore: number) => {
+    if (!webApp?.initDataUnsafe?.user?.id) return;
+
     try {
       const response = await fetch('/api/scores', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ score: finalScore }),
+        body: JSON.stringify({ 
+          user_id: webApp.initDataUnsafe.user.id,
+          score: finalScore 
+        }),
       });
       
       if (!response.ok) {
         throw new Error('Failed to submit score');
       }
+
+      const data = await response.json();
+      setHighScore(data.highest_score);
     } catch (error) {
       console.error('Error submitting score:', error);
     }
@@ -200,6 +279,9 @@ function App() {
         <div 
           ref={containerRef}
           className="relative bg-black border border-white/10 p-4 sm:p-8 rounded-3xl shadow-[0_0_50px_-12px] shadow-white/20"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center gap-2">
@@ -269,7 +351,7 @@ function App() {
           )}
 
           <div className="mt-4 text-white/40 text-sm text-center font-mono tracking-wider">
-            ARROWS TO MOVE • SPACE TO PAUSE
+            ARROWS OR SWIPE TO MOVE • SPACE TO PAUSE
           </div>
         </div>
       </div>
