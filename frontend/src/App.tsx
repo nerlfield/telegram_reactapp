@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useInterval } from './hooks/useInterval';
-import { Trophy, Heart } from 'lucide-react';
+import { Trophy, Heart, Crown, Medal } from 'lucide-react';
 import { useWebApp, useInitData } from '@vkruglikov/react-telegram-web-app';
+
+type LeaderboardEntry = {
+  rank: number;
+  user_id: number;
+  highest_score: number;
+  username: string | null;
+  first_name: string | null;
+};
 
 function App() {
   const webApp = useWebApp();
@@ -9,6 +17,12 @@ function App() {
   
   // Get user ID from URL if not available in useInitData
   const [userId, setUserId] = useState<number | undefined>(undefined);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [userRank, setUserRank] = useState<number | null>(null);
+  const [userData, setUserData] = useState<{
+    username?: string;
+    first_name?: string;
+  } | null>(null);
   
   useEffect(() => {
     // Get init data from URL for debugging
@@ -16,9 +30,13 @@ function App() {
     const rawInitData = searchParams.get('tgWebAppData');
     const parsedInitData = rawInitData ? JSON.parse(decodeURIComponent(rawInitData)) : null;
     
-    // Set user ID from parsed data if available
-    if (parsedInitData?.user?.id) {
+    // Set user ID and data from parsed data if available
+    if (parsedInitData?.user) {
       setUserId(parsedInitData.user.id);
+      setUserData({
+        username: parsedInitData.user.username,
+        first_name: parsedInitData.user.first_name
+      });
     }
 
     console.log('WebApp Data:', {
@@ -273,6 +291,32 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [direction]);
 
+  const fetchLeaderboard = async () => {
+    try {
+      const response = await fetch('/api/leaderboard');
+      if (!response.ok) {
+        throw new Error('Failed to fetch leaderboard');
+      }
+      const data = await response.json();
+      setLeaderboard(data);
+      
+      // Find user's rank
+      const userEntry = data.find((entry: LeaderboardEntry) => entry.user_id === userId);
+      if (userEntry) {
+        setUserRank(userEntry.rank);
+      }
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+    }
+  };
+
+  // Load leaderboard when game is over
+  useEffect(() => {
+    if (isGameOver) {
+      fetchLeaderboard();
+    }
+  }, [isGameOver]);
+
   const submitScore = async (finalScore: number) => {
     if (!userId) return;
 
@@ -284,7 +328,9 @@ function App() {
         },
         body: JSON.stringify({ 
           user_id: userId,
-          score: finalScore 
+          score: finalScore,
+          username: userData?.username,
+          first_name: userData?.first_name
         }),
       });
       
@@ -294,6 +340,8 @@ function App() {
 
       const data = await response.json();
       setHighScore(data.highest_score);
+      // Refresh leaderboard after submitting score
+      fetchLeaderboard();
     } catch (error) {
       console.error('Error submitting score:', error);
     }
@@ -377,12 +425,49 @@ function App() {
 
           {(isGameOver || isPaused) && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-sm">
-              <div className="text-center">
+              <div className="text-center w-full max-w-sm">
                 <h2 className="text-3xl font-bold text-white mb-4 font-mono">
                   {isGameOver ? 'GAME OVER' : 'PAUSED'}
                 </h2>
                 {isGameOver && (
-                  <p className="text-white mb-4 font-mono">Final Score: {score}</p>
+                  <>
+                    <p className="text-white mb-6 font-mono">Final Score: {score}</p>
+                    
+                    {/* Leaderboard */}
+                    <div className="mb-6 bg-white/5 rounded-lg p-4">
+                      <div className="flex items-center justify-center gap-2 mb-4">
+                        <Crown className="text-yellow-500" size={24} />
+                        <h3 className="text-white font-mono text-xl">Leaderboard</h3>
+                      </div>
+                      <div className="space-y-2">
+                        {leaderboard.map((entry) => (
+                          <div 
+                            key={entry.user_id}
+                            className={`flex items-center justify-between p-2 rounded ${
+                              entry.user_id === userId ? 'bg-white/20' : 'bg-white/5'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-white/60 font-mono w-6">{entry.rank}</span>
+                              <span className="text-white font-mono">
+                                {entry.username || entry.first_name || `Player ${entry.user_id}`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-white font-mono">{entry.highest_score}</span>
+                              {entry.rank <= 3 && (
+                                <Medal className={
+                                  entry.rank === 1 ? 'text-yellow-500' :
+                                  entry.rank === 2 ? 'text-gray-400' :
+                                  'text-yellow-700'
+                                } size={16} />
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
                 <button
                   onClick={isGameOver ? resetGame : () => setIsPaused(false)}
