@@ -1,20 +1,53 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useInterval } from './hooks/useInterval';
 import { Trophy, Heart } from 'lucide-react';
-import { useTelegramWebApp } from './hooks/useTelegramWebApp';
-
-type Position = {
-  x: number;
-  y: number;
-};
-
-type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
-
-const GRID_SIZE = 20;
-const INITIAL_SPEED = 150;
-const SPEED_INCREASE = 5;
+import { useWebApp, useInitData } from '@vkruglikov/react-telegram-web-app';
 
 function App() {
+  const webApp = useWebApp();
+  const { user } = useInitData();
+  
+  // Get user ID from URL if not available in useInitData
+  const [userId, setUserId] = useState<number | undefined>(undefined);
+  
+  useEffect(() => {
+    // Get init data from URL for debugging
+    const searchParams = new URLSearchParams(window.location.search);
+    const rawInitData = searchParams.get('tgWebAppData');
+    const parsedInitData = rawInitData ? JSON.parse(decodeURIComponent(rawInitData)) : null;
+    
+    // Set user ID from parsed data if available
+    if (parsedInitData?.user?.id) {
+      setUserId(parsedInitData.user.id);
+    }
+
+    console.log('WebApp Data:', {
+      rawInitData,
+      parsedInitData,
+      user,
+      userId: parsedInitData?.user?.id,
+      platform: webApp.platform,
+      version: webApp.version,
+      colorScheme: webApp.colorScheme,
+      themeParams: webApp.themeParams
+    });
+
+    // Initialize WebApp
+    webApp.ready();
+    webApp.expand();
+  }, [webApp, user]);
+
+  type Position = {
+    x: number;
+    y: number;
+  };
+
+  type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
+
+  const GRID_SIZE = 20;
+  const INITIAL_SPEED = 150;
+  const SPEED_INCREASE = 5;
+
   const [snake, setSnake] = useState<Position[]>([{ x: 10, y: 10 }]);
   const [food, setFood] = useState<Position>({ x: 15, y: 15 });
   const [direction, setDirection] = useState<Direction>('RIGHT');
@@ -23,9 +56,18 @@ function App() {
   const [highScore, setHighScore] = useState(0);
   const [speed, setSpeed] = useState(INITIAL_SPEED);
   const [isPaused, setIsPaused] = useState(false);
-  const webApp = useTelegramWebApp();
   const [cellSize, setCellSize] = useState(20);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  useEffect(() => {
+    // Set theme colors based on Telegram theme
+    if (webApp.themeParams) {
+      document.documentElement.style.setProperty('--tg-theme-bg-color', webApp.themeParams.bg_color);
+      document.documentElement.style.setProperty('--tg-theme-text-color', webApp.themeParams.text_color);
+      document.documentElement.style.setProperty('--tg-theme-button-color', webApp.themeParams.button_color);
+      document.documentElement.style.setProperty('--tg-theme-button-text-color', webApp.themeParams.button_text_color);
+    }
+  }, [webApp.themeParams]);
 
   // Add new state for touch handling
   const [touchStart, setTouchStart] = useState<Position | null>(null);
@@ -33,10 +75,10 @@ function App() {
   // Load high score on component mount
   useEffect(() => {
     const loadHighScore = async () => {
-      if (!webApp?.initDataUnsafe?.user?.id) return;
+      if (!userId) return;
       
       try {
-        const response = await fetch(`/api/scores/${webApp.initDataUnsafe.user.id}`);
+        const response = await fetch(`/api/scores/${userId}`);
         if (!response.ok) {
           throw new Error('Failed to fetch high score');
         }
@@ -48,7 +90,7 @@ function App() {
     };
 
     loadHighScore();
-  }, [webApp?.initDataUnsafe?.user?.id]);
+  }, [userId]);
 
   // Add touch handlers
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -232,7 +274,7 @@ function App() {
   }, [direction]);
 
   const submitScore = async (finalScore: number) => {
-    if (!webApp?.initDataUnsafe?.user?.id) return;
+    if (!userId) return;
 
     try {
       const response = await fetch('/api/scores', {
@@ -241,7 +283,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          user_id: webApp.initDataUnsafe.user.id,
+          user_id: userId,
           score: finalScore 
         }),
       });
@@ -260,15 +302,17 @@ function App() {
   useEffect(() => {
     if (isGameOver) {
       submitScore(score);
-      if (webApp?.MainButton) {
-        webApp.MainButton.text = 'Play Again';
-        webApp.MainButton.show();
-        webApp.MainButton.onClick(resetGame);
-      }
+      webApp.MainButton.text = 'Play Again';
+      webApp.MainButton.show();
+      webApp.MainButton.onClick(resetGame);
     } else {
-      webApp?.MainButton?.hide();
+      webApp.MainButton.hide();
     }
-  }, [isGameOver, score, webApp]);
+
+    return () => {
+      webApp.MainButton.offClick(resetGame);
+    };
+  }, [isGameOver, score, webApp.MainButton]);
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center overflow-hidden">

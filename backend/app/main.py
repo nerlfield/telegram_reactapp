@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel
 import os
 
 # Database setup
@@ -18,6 +19,11 @@ class UserScore(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(BigInteger, unique=True, index=True)
     highest_score = Column(Integer, default=0)
+
+# Pydantic models
+class ScoreSubmission(BaseModel):
+    user_id: int
+    score: int
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -46,21 +52,28 @@ async def root():
 
 @app.get("/scores/{user_id}")
 async def get_user_score(user_id: int, db: Session = Depends(get_db)):
-    user_score = db.query(UserScore).filter(UserScore.user_id == user_id).first()
-    if not user_score:
-        return {"highest_score": 0}
-    return {"highest_score": user_score.highest_score}
+    try:
+        user_score = db.query(UserScore).filter(UserScore.user_id == user_id).first()
+        if not user_score:
+            return {"highest_score": 0}
+        return {"highest_score": user_score.highest_score}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scores")
-async def save_score(user_id: int, score: int, db: Session = Depends(get_db)):
-    user_score = db.query(UserScore).filter(UserScore.user_id == user_id).first()
-    
-    if user_score:
-        if score > user_score.highest_score:
-            user_score.highest_score = score
-    else:
-        user_score = UserScore(user_id=user_id, highest_score=score)
-        db.add(user_score)
-    
-    db.commit()
-    return {"message": "Score saved", "highest_score": user_score.highest_score} 
+async def save_score(score_data: ScoreSubmission, db: Session = Depends(get_db)):
+    try:
+        user_score = db.query(UserScore).filter(UserScore.user_id == score_data.user_id).first()
+        
+        if user_score:
+            if score_data.score > user_score.highest_score:
+                user_score.highest_score = score_data.score
+        else:
+            user_score = UserScore(user_id=score_data.user_id, highest_score=score_data.score)
+            db.add(user_score)
+        
+        db.commit()
+        return {"message": "Score saved", "highest_score": user_score.highest_score}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) 
