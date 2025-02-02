@@ -1,26 +1,36 @@
-# Build stage
-FROM node:20-alpine as base
+# Stage: development
+FROM node:18-alpine as development
 
 WORKDIR /app
 
-# Development stage
-FROM base as development
+# Install dependencies for development
 COPY package*.json ./
 RUN npm install
-ENV NODE_ENV=development
+
+# Copy all files for development with hot reloading via volume mounts
+COPY . .
+
 EXPOSE 5173
+
 CMD ["npm", "run", "dev", "--", "--host"]
 
-# Production build stage
-FROM base as build
+# Stage: builder (for production)
+FROM node:18-alpine as builder
+
+WORKDIR /app
+
+# Install dependencies and build the production app
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build
 
-# Production stage
+# Stage: production
 FROM nginx:alpine as production
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built files from builder stage to nginx html directory
+COPY --from=builder /app/dist /usr/share/nginx/html
+
 EXPOSE 80
+
 CMD ["nginx", "-g", "daemon off;"] 

@@ -1,98 +1,57 @@
 import os
-import hmac
-import hashlib
-import json
-import time
 import logging
-from urllib.parse import urlencode
-from telegram import Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup
+from telegram import Update, WebAppInfo, MenuButtonWebApp, WebAppInfo
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # Configure logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBAPP_URL = os.getenv("WEBAPP_URL")
 
-def generate_init_data(user):
-    """Generate init data for Telegram Web App."""
-    init_data = {
-        "query_id": "",  # Optional query ID
-        "user": {
-            "id": user.id,
-            "first_name": user.first_name,
-            "last_name": user.last_name if user.last_name else "",
-            "username": user.username if user.username else "",
-            "language_code": user.language_code if user.language_code else "en"
-        },
-        "auth_date": int(time.time()),
-        "start_param": ""  # Optional start parameter
-    }
-    
-    # Sort dictionary items for consistent data check string
-    sorted_items = []
-    for key in sorted(init_data.keys()):
-        value = init_data[key]
-        if key == "user":
-            # Handle user object separately
-            user_items = []
-            for user_key in sorted(value.keys()):
-                user_value = value[user_key]
-                if user_value:  # Only include non-empty values
-                    user_items.append(f"{user_key}={user_value}")
-            sorted_items.append(f"user={{{','.join(user_items)}}}")
-        else:
-            if value:  # Only include non-empty values
-                sorted_items.append(f"{key}={value}")
-    
-    data_check_string = "\n".join(sorted_items)
-    
-    # Generate hash
-    secret_key = hmac.new("WebAppData".encode(), BOT_TOKEN.encode(), hashlib.sha256).digest()
-    init_data["hash"] = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-    
-    return urlencode({"tgWebAppData": json.dumps(init_data)})
+# Validate environment variables
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is not set")
+if not WEBAPP_URL:
+    raise ValueError("WEBAPP_URL environment variable is not set")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a message with a button that opens the web app."""
-    init_data = generate_init_data(update.effective_user)
-    webapp_url = f"{WEBAPP_URL}?{init_data}"
-    
-    logger.info(f"Generated WebApp URL: {webapp_url}")
-    
-    button = KeyboardButton(
-        text="Play Snake! 🐍",
-        web_app=WebAppInfo(url=webapp_url)
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /start command"""
+    user = update.effective_user
+    if not user:
+        return
+
+    # Set the menu button to open the web app
+    await context.bot.set_chat_menu_button(
+        chat_id=update.effective_chat.id,
+        menu_button=MenuButtonWebApp(text="Open Mini App", web_app=WebAppInfo(url=WEBAPP_URL))
     )
-    keyboard = ReplyKeyboardMarkup([[button]], resize_keyboard=True)
+
     await update.message.reply_text(
-        "Welcome to Snake Game! Click the button below to start playing:",
-        reply_markup=keyboard
+        f"Hello {user.first_name}! Click the button below the text input to open our Mini App."
     )
 
-def main():
-    """Start the bot."""
+def main() -> None:
+    """Start the bot"""
     logger.info("Starting bot...")
     
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable is not set")
-        raise ValueError("BOT_TOKEN environment variable is not set")
-    
-    if not WEBAPP_URL:
-        logger.error("WEBAPP_URL environment variable is not set")
-        raise ValueError("WEBAPP_URL environment variable is not set")
-    
-    logger.info(f"Using WEBAPP_URL: {WEBAPP_URL}")
-        
+    # Create the Application
     application = Application.builder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    
-    logger.info("Bot is ready to handle updates")
-    application.run_polling()
+
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start_command))
+
+    # Start the bot
+    logger.info("Bot is running...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main() 
